@@ -3,10 +3,20 @@
 @tailwind utilities;
 
 /* Custom global styles (optional) */
-body {
-  @apply bg-gray-100 text-slate-800 antialiased;
-}
+@layer base {
+  body {
+    background-color: #f9fafb; /* equivalent to bg-gray-50 */
+    color: #1e293b; /* equivalent to text-slate-800 */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 
-input, button, select, textarea {
-  @apply outline-none focus:ring-2 focus:ring-blue-500;
+  input, button, select, textarea {
+    outline: none;
+  }
+
+  input:focus, button:focus, select:focus, textarea:focus {
+    ring: 2px solid #3b82f6;
+    ring-offset: 2px;
+  }
 }

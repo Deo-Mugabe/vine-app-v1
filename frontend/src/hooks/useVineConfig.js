@@ -1,8 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { configService } from '../services/configService';
+import { useNotification } from '../context/NotificationContext';
 
 export const useVineConfig = () => {
   const queryClient = useQueryClient();
+  const { showNotification } = useNotification();
 
   const {
     data: vineConfig,
@@ -17,6 +19,7 @@ export const useVineConfig = () => {
     retry: 2,
     onError: (error) => {
       console.error('Error fetching VINE config:', error);
+      showNotification('Failed to load VINE configuration.', 'error');
     },
   });
 
@@ -25,9 +28,11 @@ export const useVineConfig = () => {
     onSuccess: (data) => {
       queryClient.setQueryData(['vineConfig'], data);
       queryClient.invalidateQueries(['vineConfig']);
+      showNotification('VINE configuration updated successfully.', 'success');
     },
     onError: (error) => {
       console.error('Error updating VINE config:', error);
+      showNotification('Failed to update VINE configuration.', 'error');
     },
   });
 
@@ -37,48 +42,6 @@ export const useVineConfig = () => {
     error,
     refetch,
     updateVineConfig: updateMutation.mutate,
-    isUpdating: updateMutation.isLoading,
-    updateError: updateMutation.error,
-    updateSuccess: updateMutation.isSuccess,
-  };
-};
-
-export const useFtpConfig = () => {
-  const queryClient = useQueryClient();
-
-  const {
-    data: ftpConfig,
-    isLoading,
-    error,
-    refetch,
-  } = useQuery({
-    queryKey: ['ftpConfig'],
-    queryFn: configService.getFtpConfig,
-    staleTime: 5 * 60 * 1000,
-    cacheTime: 10 * 60 * 1000,
-    retry: 2,
-    onError: (error) => {
-      console.error('Error fetching FTP config:', error);
-    },
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: configService.updateFtpConfig,
-    onSuccess: (data) => {
-      queryClient.setQueryData(['ftpConfig'], data);
-      queryClient.invalidateQueries(['ftpConfig']);
-    },
-    onError: (error) => {
-      console.error('Error updating FTP config:', error);
-    },
-  });
-
-  return {
-    ftpConfig,
-    isLoading,
-    error,
-    refetch,
-    updateFtpConfig: updateMutation.mutate,
     isUpdating: updateMutation.isLoading,
     updateError: updateMutation.error,
     updateSuccess: updateMutation.isSuccess,

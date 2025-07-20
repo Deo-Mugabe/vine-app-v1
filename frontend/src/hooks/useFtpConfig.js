@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { configService } from '../services/configService';
-import { useNotification } from './useNotification';
+import { useNotification } from '../context/NotificationContext';
 
 export const useFtpConfig = () => {
   const queryClient = useQueryClient();
