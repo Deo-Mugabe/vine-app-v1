@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Square, RotateCcw, Clock, History, Settings, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
-import { useScheduler } from '../../hooks/useScheduler'; // Fixed: Changed from ../hooks/useScheduler to ../../hooks/useScheduler
+import { useScheduler } from '../../hooks/useScheduler';
 import Button from '../ui/Button';
 import FormInput from './FormInput';
 import FormSection from './FormSection';
@@ -21,7 +21,8 @@ const SchedulerForm = () => {
     isStarting,
     isStopping,
     isUpdatingConfig,
-    isTriggeringJob
+    isTriggeringJob,
+    error
   } = useScheduler();
 
   const [configForm, setConfigForm] = useState({
@@ -47,25 +48,45 @@ const SchedulerForm = () => {
     }
   }, [schedulerStatus]);
 
-  const handleStart = () => {
-    startScheduler(configForm.intervalMinutes);
+  const handleStart = async () => {
+    try {
+      await startScheduler(configForm.intervalMinutes);
+    } catch (err) {
+      console.error('Failed to start scheduler:', err);
+    }
   };
 
-  const handleStop = () => {
-    stopScheduler();
+  const handleStop = async () => {
+    try {
+      await stopScheduler();
+    } catch (err) {
+      console.error('Failed to stop scheduler:', err);
+    }
   };
 
-  const handleUpdateConfig = (e) => {
+  const handleUpdateConfig = async (e) => {
     e.preventDefault();
-    updateConfig(configForm.enabled, configForm.intervalMinutes, configForm.startFromTime);
+    try {
+      await updateConfig(configForm.enabled, configForm.intervalMinutes, configForm.startFromTime);
+    } catch (err) {
+      console.error('Failed to update config:', err);
+    }
   };
 
-  const handleTriggerNow = () => {
-    triggerJobNow();
+  const handleTriggerNow = async () => {
+    try {
+      await triggerJobNow();
+    } catch (err) {
+      console.error('Failed to trigger job:', err);
+    }
   };
 
-  const handleHistoryRefresh = () => {
-    fetchHistory(historyFilters.page, historyFilters.size, historyFilters.days);
+  const handleHistoryRefresh = async () => {
+    try {
+      await fetchHistory(historyFilters.page, historyFilters.size, historyFilters.days);
+    } catch (err) {
+      console.error('Failed to refresh history:', err);
+    }
   };
 
   const getStatusIcon = (status) => {
@@ -85,18 +106,26 @@ const SchedulerForm = () => {
 
   const formatDateTime = (dateString) => {
     if (!dateString) return 'N/A';
-    return new Date(dateString).toLocaleString();
+    try {
+      return new Date(dateString).toLocaleString();
+    } catch {
+      return 'Invalid Date';
+    }
   };
 
   const formatDuration = (startTime, endTime) => {
     if (!startTime || !endTime) return 'N/A';
-    const start = new Date(startTime);
-    const end = new Date(endTime);
-    const diffMs = end - start;
-    const diffSecs = Math.floor(diffMs / 1000);
-    const mins = Math.floor(diffSecs / 60);
-    const secs = diffSecs % 60;
-    return `${mins}m ${secs}s`;
+    try {
+      const start = new Date(startTime);
+      const end = new Date(endTime);
+      const diffMs = end - start;
+      const diffSecs = Math.floor(diffMs / 1000);
+      const mins = Math.floor(diffSecs / 60);
+      const secs = diffSecs % 60;
+      return `${mins}m ${secs}s`;
+    } catch {
+      return 'N/A';
+    }
   };
 
   if (isLoadingStatus) {
@@ -109,6 +138,11 @@ const SchedulerForm = () => {
 
   return (
       <div className="space-y-6">
+        {/* Error Message */}
+        {error && (
+            <StatusMessage message={error} type="error" />
+        )}
+
         {/* Current Status Section */}
         <FormSection
             title="Scheduler Status"
@@ -161,7 +195,7 @@ const SchedulerForm = () => {
               <Button
                   onClick={handleStart}
                   loading={isStarting}
-                  disabled={schedulerStatus?.running}
+                  disabled={schedulerStatus?.running || isStarting}
                   className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400"
               >
                 <Play className="h-4 w-4 mr-1" />
@@ -171,7 +205,7 @@ const SchedulerForm = () => {
               <Button
                   onClick={handleStop}
                   loading={isStopping}
-                  disabled={!schedulerStatus?.running}
+                  disabled={!schedulerStatus?.running || isStopping}
                   className="bg-red-600 hover:bg-red-700 disabled:bg-gray-400"
               >
                 <Square className="h-4 w-4 mr-1" />
@@ -181,6 +215,7 @@ const SchedulerForm = () => {
               <Button
                   onClick={handleTriggerNow}
                   loading={isTriggeringJob}
+                  disabled={isTriggeringJob}
                   className="bg-blue-600 hover:bg-blue-700"
               >
                 <RotateCcw className="h-4 w-4 mr-1" />
@@ -195,7 +230,7 @@ const SchedulerForm = () => {
             title="Scheduler Configuration"
             description="Configure scheduler settings and timing"
         >
-          <div className="space-y-4">
+          <form onSubmit={handleUpdateConfig} className="space-y-4">
             <div className="grid grid-cols-1 gap-4">
               <FormInput
                   label="Interval (minutes)"
@@ -205,7 +240,7 @@ const SchedulerForm = () => {
                   value={configForm.intervalMinutes}
                   onChange={(e) => setConfigForm(prev => ({
                     ...prev,
-                    intervalMinutes: parseInt(e.target.value) || 30
+                    intervalMinutes: Math.max(1, parseInt(e.target.value) || 30)
                   }))}
                   required
               />
@@ -218,6 +253,7 @@ const SchedulerForm = () => {
                     ...prev,
                     startFromTime: e.target.value
                   }))}
+                  placeholder="Optional - format: HH:MM"
               />
 
               <div className="flex items-center space-x-2">
@@ -238,14 +274,15 @@ const SchedulerForm = () => {
             </div>
 
             <Button
-                onClick={handleUpdateConfig}
+                type="submit"
                 loading={isUpdatingConfig}
+                disabled={isUpdatingConfig}
                 className="bg-blue-600 hover:bg-blue-700"
             >
               <Settings className="h-4 w-4 mr-1" />
               Update Configuration
             </Button>
-          </div>
+          </form>
         </FormSection>
 
         {/* Job History Section */}
@@ -288,6 +325,7 @@ const SchedulerForm = () => {
               <Button
                   onClick={handleHistoryRefresh}
                   loading={isLoadingHistory}
+                  disabled={isLoadingHistory}
                   className="bg-gray-600 hover:bg-gray-700"
               >
                 <History className="h-4 w-4 mr-1" />

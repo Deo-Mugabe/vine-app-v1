@@ -1,138 +1,171 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState, useEffect, useCallback } from 'react';
 import { schedulerService } from '../services/schedulerService';
-import { useNotification } from '../context/NotificationContext';
 
 export const useScheduler = () => {
-  const queryClient = useQueryClient();
-  const { showNotification } = useNotification();
+  const [schedulerStatus, setSchedulerStatus] = useState(null);
+  const [schedulerHistory, setSchedulerHistory] = useState(null);
+  const [isLoadingStatus, setIsLoadingStatus] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
+  const [isUpdatingConfig, setIsUpdatingConfig] = useState(false);
+  const [isTriggeringJob, setIsTriggeringJob] = useState(false);
+  const [error, setError] = useState(null);
 
-  // Get scheduler status
-  const {
-    data: schedulerStatus,
-    isLoading: isLoadingStatus,
-    error: statusError,
-    refetch: refetchStatus,
-  } = useQuery({
-    queryKey: ['schedulerStatus'],
-    queryFn: schedulerService.getSchedulerStatus,
-    refetchInterval: 5000, // Refresh every 5 seconds for live updates
-    onError: (error) => {
-      console.error('Error fetching scheduler status:', error);
-      showNotification('Failed to load scheduler status.', 'error');
-    },
-  });
-
-  // Get scheduler history
-  const {
-    data: schedulerHistory,
-    isLoading: isLoadingHistory,
-    error: historyError,
-    refetch: refetchHistory,
-  } = useQuery({
-    queryKey: ['schedulerHistory'],
-    queryFn: () => schedulerService.getJobHistory(0, 20, null),
-    staleTime: 30 * 1000, // 30 seconds
-    onError: (error) => {
-      console.error('Error fetching scheduler history:', error);
-      showNotification('Failed to load job history.', 'error');
-    },
-  });
-
-  // Start scheduler mutation
-  const startMutation = useMutation({
-    mutationFn: schedulerService.startScheduler,
-    onSuccess: () => {
-      queryClient.invalidateQueries(['schedulerStatus']);
-      showNotification('Scheduler started successfully.', 'success');
-    },
-    onError: (error) => {
-      console.error('Error starting scheduler:', error);
-      showNotification('Failed to start scheduler.', 'error');
-    },
-  });
-
-  // Stop scheduler mutation
-  const stopMutation = useMutation({
-    mutationFn: schedulerService.stopScheduler,
-    onSuccess: () => {
-      queryClient.invalidateQueries(['schedulerStatus']);
-      showNotification('Scheduler stopped successfully.', 'success');
-    },
-    onError: (error) => {
-      console.error('Error stopping scheduler:', error);
-      showNotification('Failed to stop scheduler.', 'error');
-    },
-  });
-
-  // Update config mutation
-  const updateConfigMutation = useMutation({
-    mutationFn: ({ enabled, intervalMinutes, startFromTime }) =>
-      schedulerService.updateSchedulerConfig({ enabled, intervalMinutes, startFromTime }),
-    onSuccess: () => {
-      queryClient.invalidateQueries(['schedulerStatus']);
-      showNotification('Scheduler configuration updated successfully.', 'success');
-    },
-    onError: (error) => {
-      console.error('Error updating scheduler config:', error);
-      showNotification('Failed to update scheduler configuration.', 'error');
-    },
-  });
-
-  // Trigger job now mutation
-  const triggerJobMutation = useMutation({
-    mutationFn: schedulerService.runJobNow,
-    onSuccess: () => {
-      queryClient.invalidateQueries(['schedulerStatus']);
-      queryClient.invalidateQueries(['schedulerHistory']);
-      showNotification('Job triggered successfully.', 'success');
-    },
-    onError: (error) => {
-      console.error('Error triggering job:', error);
-      showNotification('Failed to trigger job manually.', 'error');
-    },
-  });
-
-  // Fetch history with custom parameters
-  const fetchHistory = async (page = 0, size = 20, days = null) => {
+  // Fetch scheduler status
+  const fetchStatus = useCallback(async () => {
+    setIsLoadingStatus(true);
+    setError(null);
     try {
-      const data = await schedulerService.getJobHistory(page, size, days);
-      queryClient.setQueryData(['schedulerHistory'], data);
-      return data;
-    } catch (error) {
-      console.error('Error fetching history:', error);
-      showNotification('Failed to fetch job history.', 'error');
-      throw error;
+      const status = await schedulerService.getSchedulerStatus();
+      setSchedulerStatus(status);
+    } catch (err) {
+      console.error('Error fetching scheduler status:', err);
+      setError(err.response?.data?.message || 'Failed to fetch scheduler status');
+    } finally {
+      setIsLoadingStatus(false);
     }
-  };
+  }, []);
+
+  // Fetch scheduler history
+  const fetchHistory = useCallback(async (page = 0, size = 20, days = null) => {
+    setIsLoadingHistory(true);
+    setError(null);
+    try {
+      const history = await schedulerService.getJobHistory(page, size, days);
+      setSchedulerHistory(history);
+    } catch (err) {
+      console.error('Error fetching scheduler history:', err);
+      setError(err.response?.data?.message || 'Failed to fetch scheduler history');
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }, []);
+
+  // Start scheduler
+  const startScheduler = useCallback(async (intervalMinutes = 30) => {
+    setIsStarting(true);
+    setError(null);
+    try {
+      const result = await schedulerService.startScheduler(intervalMinutes);
+      setSchedulerStatus(result);
+      // Refresh status after starting
+      await fetchStatus();
+    } catch (err) {
+      console.error('Error starting scheduler:', err);
+      setError(err.response?.data?.message || 'Failed to start scheduler');
+    } finally {
+      setIsStarting(false);
+    }
+  }, [fetchStatus]);
+
+  // Stop scheduler
+  const stopScheduler = useCallback(async () => {
+    setIsStopping(true);
+    setError(null);
+    try {
+      const result = await schedulerService.stopScheduler();
+      setSchedulerStatus(result);
+      // Refresh status after stopping
+      await fetchStatus();
+    } catch (err) {
+      console.error('Error stopping scheduler:', err);
+      setError(err.response?.data?.message || 'Failed to stop scheduler');
+    } finally {
+      setIsStopping(false);
+    }
+  }, [fetchStatus]);
+
+  // Update scheduler configuration
+  const updateConfig = useCallback(async (enabled, intervalMinutes, startFromTime) => {
+    setIsUpdatingConfig(true);
+    setError(null);
+    try {
+      const config = {
+        enabled,
+        intervalMinutes,
+        startFromTime: startFromTime || null
+      };
+      const result = await schedulerService.updateSchedulerConfig(config);
+      setSchedulerStatus(result);
+      // Refresh status after updating config
+      await fetchStatus();
+    } catch (err) {
+      console.error('Error updating scheduler config:', err);
+      setError(err.response?.data?.message || 'Failed to update scheduler configuration');
+    } finally {
+      setIsUpdatingConfig(false);
+    }
+  }, [fetchStatus]);
+
+  // Trigger job now
+  const triggerJobNow = useCallback(async () => {
+    setIsTriggeringJob(true);
+    setError(null);
+    try {
+      await schedulerService.runJobNow();
+      // Refresh status and history after triggering job
+      await Promise.all([fetchStatus(), fetchHistory()]);
+    } catch (err) {
+      console.error('Error triggering job:', err);
+      setError(err.response?.data?.message || 'Failed to trigger job');
+    } finally {
+      setIsTriggeringJob(false);
+    }
+  }, [fetchStatus, fetchHistory]);
+
+  // Load initial data
+  useEffect(() => {
+    fetchStatus();
+    fetchHistory();
+  }, [fetchStatus, fetchHistory]);
 
   return {
-    // Data
     schedulerStatus,
     schedulerHistory,
-    
-    // Loading states
     isLoadingStatus,
     isLoadingHistory,
-    
-    // Errors
-    statusError,
-    historyError,
-    
-    // Actions
-    startScheduler: startMutation.mutate,
-    stopScheduler: stopMutation.mutate,
-    updateConfig: updateConfigMutation.mutate,
-    triggerJobNow: triggerJobMutation.mutate,
-    fetchHistory,
-    
-    // Action loading states
-    isStarting: startMutation.isLoading,
-    isStopping: stopMutation.isLoading,
-    isUpdatingConfig: updateConfigMutation.isLoading,
-    isTriggeringJob: triggerJobMutation.isLoading,
-    
-    // Refetch functions
-    refetchStatus,
-    refetchHistory,
+    isStarting,
+    isStopping,
+    isUpdatingConfig,
+    isTriggeringJob,
+    error,
+    startScheduler,
+    stopScheduler,
+    updateConfig,
+    triggerJobNow,
+    fetchStatus,
+    fetchHistory
+  };
+};
+
+export const useJobHistory = (page = 0, pageSize = 20, daysFilter = null) => {
+  const [data, setData] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetchData = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await schedulerService.getJobHistory(page, pageSize, daysFilter);
+      setData(result);
+    } catch (err) {
+      console.error('Error fetching job history:', err);
+      setError(err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [page, pageSize, daysFilter]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  return {
+    data,
+    isLoading,
+    error,
+    refetch: fetchData
   };
 };
