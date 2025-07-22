@@ -29,34 +29,39 @@ public class QuartzConfig {
         factory.setStartupDelay(10); // Start after 10 seconds
         factory.setOverwriteExistingJobs(true);
         factory.setAutoStartup(true);
-
+        
         // Register the job details
         factory.setJobDetails(bookingProcessorJobDetail());
-
+        
         return factory;
     }
 
     @Bean
     public Properties quartzProperties() {
         Properties properties = new Properties();
-
+        
         // Scheduler properties
         properties.setProperty("org.quartz.scheduler.instanceName", "VineScheduler");
         properties.setProperty("org.quartz.scheduler.instanceId", "AUTO");
         properties.setProperty("org.quartz.scheduler.skipUpdateCheck", "true");
-
+        
         // ThreadPool properties
         properties.setProperty("org.quartz.threadPool.class", "org.quartz.simpl.SimpleThreadPool");
         properties.setProperty("org.quartz.threadPool.threadCount", "10");
         properties.setProperty("org.quartz.threadPool.threadPriority", "5");
-
-        // JobStore properties - CRITICAL: Use PostgreSQL delegate
+        
+        // JobStore properties - Use binary storage (default for SQL Server)
         properties.setProperty("org.quartz.jobStore.class", "org.springframework.scheduling.quartz.LocalDataSourceJobStore");
-        properties.setProperty("org.quartz.jobStore.driverDelegateClass", "org.quartz.impl.jdbcjobstore.PostgreSQLDelegate");
+        properties.setProperty("org.quartz.jobStore.driverDelegateClass", "org.quartz.impl.jdbcjobstore.MSSQLDelegate");
         properties.setProperty("org.quartz.jobStore.tablePrefix", "QRTZ_");
         properties.setProperty("org.quartz.jobStore.isClustered", "false");
-        properties.setProperty("org.quartz.jobStore.useProperties", "true"); // CRITICAL for PostgreSQL
-
+        properties.setProperty("org.quartz.jobStore.useProperties", "false"); // Use binary storage
+        
+        // SQL Server specific properties to fix autocommit issues
+        properties.setProperty("org.quartz.jobStore.dontSetAutoCommitFalse", "false");
+        properties.setProperty("org.quartz.jobStore.dontSetNonManagedTXConnectionAutoCommitFalse", "false");
+        properties.setProperty("org.quartz.jobStore.selectWithLockSQL", "SELECT * FROM {0}LOCKS WITH (UPDLOCK,ROWLOCK) WHERE SCHED_NAME = {1} AND LOCK_NAME = ?");
+        
         return properties;
     }
 
