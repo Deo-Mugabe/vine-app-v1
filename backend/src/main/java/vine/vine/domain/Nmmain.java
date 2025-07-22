@@ -1,12 +1,17 @@
 package vine.vine.domain;
 
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.Data;
+import vine.vine.service.Impl.ChargesServiceImpl;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 @Entity
@@ -36,7 +41,7 @@ public class Nmmain {
     private String lastname;
 
     @Column(name = "dob")
-    private LocalDate dob;
+    private String dob;
 
     @Column(name = "race")
     private String race;
@@ -100,4 +105,62 @@ public class Nmmain {
 
     @Column(name = "mphone")
     private String mphone;
+
+    private static final Logger log = LoggerFactory.getLogger(Nmmain.class);
+
+        // ✅ Helper method to safely convert string DOB to LocalDate
+    public LocalDate getDobAsLocalDate() {
+        if (dob == null || dob.trim().isEmpty()) {
+            return null;
+        }
+        
+        try {
+            String cleanDob = dob.trim();
+            
+            // Skip obvious invalid values
+            if (cleanDob.equalsIgnoreCase("null") || 
+                cleanDob.equalsIgnoreCase("n/a") || 
+                cleanDob.equals("00/00/0000") ||
+                cleanDob.equals("0000-00-00")) {
+                return null;
+            }
+            
+            // Try different date formats your database might use
+            if (cleanDob.length() == 8 && cleanDob.matches("\\d{8}")) {
+                // YYYYMMDD format
+                return LocalDate.parse(cleanDob, DateTimeFormatter.ofPattern("yyyyMMdd"));
+            } else if (cleanDob.length() == 10 && cleanDob.contains("-")) {
+                // YYYY-MM-DD format
+                return LocalDate.parse(cleanDob);
+            } else if (cleanDob.length() == 10 && cleanDob.contains("/")) {
+                // MM/DD/YYYY format
+                return LocalDate.parse(cleanDob, DateTimeFormatter.ofPattern("MM/dd/yyyy"));
+            } else if (cleanDob.length() == 8 && cleanDob.contains("/")) {
+                // M/D/YYYY or MM/D/YY format
+                return LocalDate.parse(cleanDob, DateTimeFormatter.ofPattern("M/d/yyyy"));
+            }
+            
+            log.debug("Unrecognized date format for DOB: '{}'", cleanDob);
+            return null;
+            
+        } catch (Exception e) {
+            log.debug("Could not parse DOB '{}': {}", dob, e.getMessage());
+            return null;
+        }
+    }
+
+    // ✅ Helper method to get formatted DOB string for output
+    public String getFormattedDob(String pattern) {
+        LocalDate localDate = getDobAsLocalDate();
+        if (localDate == null) {
+            return "";
+        }
+        
+        try {
+            return localDate.format(DateTimeFormatter.ofPattern(pattern));
+        } catch (Exception e) {
+            log.debug("Could not format DOB '{}' with pattern '{}': {}", dob, pattern, e.getMessage());
+            return "";
+        }
+    }
 }

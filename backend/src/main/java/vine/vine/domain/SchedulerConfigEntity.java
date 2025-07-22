@@ -21,6 +21,12 @@ public class SchedulerConfigEntity {
     @Column(name = "enabled")
     private boolean enabled;
 
+    @Column(name = "last_start_time")
+    private LocalDateTime lastStartTime;
+    
+    @Column(name = "last_stop_time")
+    private LocalDateTime lastStopTime;
+
     @Column(name = "interval_minutes")
     private int intervalMinutes;
 

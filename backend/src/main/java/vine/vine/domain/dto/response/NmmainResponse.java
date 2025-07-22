@@ -16,7 +16,7 @@ public class NmmainResponse {
     private String firstname;
     private String middlename;
     private String lastname;
-    private LocalDate dob;
+    private String dob;
     private String race;
     private String sex;
     private String height;

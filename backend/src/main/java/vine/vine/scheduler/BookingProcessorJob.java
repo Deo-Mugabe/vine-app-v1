@@ -1,5 +1,6 @@
 package vine.vine.scheduler;
 
+import org.quartz.DisallowConcurrentExecution;
 import org.quartz.Job;
 import org.quartz.JobExecutionContext;
 import org.quartz.JobExecutionException;
@@ -14,6 +15,7 @@ import java.time.LocalDateTime;
 
 @Slf4j
 @Component
+@DisallowConcurrentExecution 
 public class BookingProcessorJob implements Job {
 
     @Autowired

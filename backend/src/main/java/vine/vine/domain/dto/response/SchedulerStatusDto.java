@@ -17,7 +17,10 @@ public class SchedulerStatusDto {
     private boolean enabled;
     private boolean running;
     private int intervalMinutes;
+    private LocalDateTime lastStartTime;
+    private LocalDateTime nextFireTime;
     private LocalDateTime lastRunTime;
+    private LocalDateTime lastStopTime;
     private LocalDateTime nextRunTime;
     private LocalDateTime startFromTime;
     private String triggerState;

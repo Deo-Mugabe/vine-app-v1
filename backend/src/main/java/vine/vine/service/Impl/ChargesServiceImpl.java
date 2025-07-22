@@ -34,11 +34,11 @@ import vine.vine.repository.JreleaseRepository;
 import vine.vine.repository.NmmainRepository;
 import vine.vine.repository.SysImageRepository;
 import vine.vine.repository.Systab1Repository;
-
+import vine.vine.service.ChargesService;
 
 @Service
 @RequiredArgsConstructor
-public class ChargesServiceImpl{
+public class ChargesServiceImpl implements ChargesService {
 
     private final ChargesRepository chargesRepository;
     private final JmmainRepository jmmainRepository;
@@ -66,36 +66,24 @@ public class ChargesServiceImpl{
         return String.format("%1$-" + width + "s", value);
     }
 
-    
-    public long processBookings(LocalDateTime lastRunTime) {
+     @Override
+    public Long  processBookings(LocalDateTime lastRunTime) {
         clearNewMugshotDir();
         List<BookingNamePair> bookingPairs = bookingFetcher.fetchBookingAndNameIds(lastRunTime);
 
         StringBuilder sb = new StringBuilder();
         long recordsProcessed = 0;
-        
-    // Process each booking pair
-//    for (BookingNamePair pair : bookingPairs) {
-//        try {
-//            Long bookingId = pair.bookId();
-//            Long nameId = pair.nameId();
-//
-//            String prisonerQuery = prisonerQuery(nameId, bookingId);
-//            String prisonerCharges = getPrisonerCharges(nameId, bookingId);
-//            String mugShotString = getMugShotString(nameId, bookingId);
-//
-//            sb.append(prisonerQuery);
-//            sb.append(prisonerCharges);
-//            sb.append(mugShotString);
-//
-//            recordsProcessed++;
-//            log.debug("Processed booking {} for name {}", bookingId, nameId);
-//        } catch (Exception e) {
-//            log.error("Error processing booking {} for name {}: {}",
-//                pair.bookId(), pair.nameId(), e.getMessage(), e);
-//            // Continue processing other records even if one fails
-//        }
-//    }
+
+      for (BookingNamePair pair : bookingPairs) {
+          Long bookingId = pair.bookId();
+          Long nameId = pair.nameId();
+          String prisonerQuery = prisonerQuery(nameId, bookingId);
+          String prisonerCharges = getPrisonerCharges(nameId, bookingId);
+          String mugShotString = getMugShotString(nameId, bookingId);
+          sb.append(prisonerQuery);
+          sb.append(prisonerCharges);
+          sb.append(mugShotString);
+      }
 
          // 🔥 Build full path using VineNewVineFilePath + VineInterfile
          String baseDir = sysConfigService.getConfig().getVineNewVineFilePath();
@@ -151,11 +139,8 @@ public class ChargesServiceImpl{
             sb.append(padRight(person.getMiddlename() != null ? person.getMiddlename() : "", 20));
             sb.append(padRight(person.getLastname() != null ? person.getLastname() : "", 20));
 
-            if (person.getDob() != null) {
-                sb.append(person.getDob().format(DateTimeFormatter.ofPattern("yyyyMMdd")));
-            } else {
-                sb.append("        ");
-            }
+            String dobFormatted = person.getFormattedDob("yyyyMMdd");
+            sb.append(padRight(dobFormatted, 8));
 
             sb.append(padRight(person.getRace() != null ? person.getRace() : "", 1));
             sb.append(padRight(person.getSex() != null ? person.getSex() : "", 1));
@@ -396,5 +381,7 @@ public class ChargesServiceImpl{
         }
     }
 
-}
 
+
+
+}
