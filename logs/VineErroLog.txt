@@ -754,3 +754,4 @@
 2025-07-22 11:06:58 - getMugShotString failure: \\svrrms\ossifiles\OSSIMAGE\Mugshot\899072.012 -> C:\Users\Deo.Mugabe\Downloads\tech\vine-app\newMugshots\404932.jpg: The process cannot access the file because it is being used by another process
 2025-07-22 11:06:59 - getMugShotString failure: \\svrrms\ossifiles\OSSIMAGE\Mugshot\722420.021 -> C:\Users\Deo.Mugabe\Downloads\tech\vine-app\newMugshots\406411.jpg: The process cannot access the file because it is being used by another process
 2025-07-22 11:06:59 - getMugShotString failure: C:\Users\Deo.Mugabe\Downloads\tech\vine-app\newMugshots\406474.jpg
+2025-07-22 16:49:40 - getMugShotString failure: Error creating bean with name 'spring.datasource-org.springframework.boot.autoconfigure.jdbc.DataSourceProperties': Could not bind properties to 'DataSourceProperties' : prefix=spring.datasource, ignoreInvalidFields=false, ignoreUnknownFields=true

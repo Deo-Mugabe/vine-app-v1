@@ -28,10 +28,13 @@ public class QuartzConfig {
         factory.setQuartzProperties(quartzProperties());
         factory.setStartupDelay(10); // Start after 10 seconds
         factory.setOverwriteExistingJobs(true);
-        factory.setAutoStartup(true);
+        factory.setAutoStartup(true); // ✅ Keep this true - starts Quartz framework only
         
-        // Register the job details
+        // ✅ IMPORTANT: Register job definition but DON'T schedule it automatically
         factory.setJobDetails(bookingProcessorJobDetail());
+        
+        // ✅ DO NOT SET TRIGGERS HERE - this prevents auto-execution
+        // factory.setTriggers(...); // ❌ REMOVED - no auto triggers
         
         return factory;
     }
@@ -69,9 +72,12 @@ public class QuartzConfig {
     public JobDetail bookingProcessorJobDetail() {
         return JobBuilder.newJob(BookingProcessorJob.class)
                 .withIdentity("bookingProcessorJob", "vine-group")
-                .withDescription("Job to process bookings")
-                .storeDurably(true)
-                .requestRecovery(true)
+                .withDescription("Job to process bookings - MANUAL START ONLY")
+                .storeDurably(true) // ✅ CRITICAL: Job exists without trigger
+                .requestRecovery(false) // ✅ CRITICAL: Don't auto-recover on startup
                 .build();
     }
+    
+    // ✅ NO TRIGGER BEANS HERE - prevents auto-execution
+    // If you had any @Bean methods creating triggers, remove them
 }

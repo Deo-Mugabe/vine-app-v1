@@ -4,6 +4,9 @@ import org.quartz.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,8 +22,6 @@ import java.time.ZoneId;
 import java.util.List;
 import jakarta.annotation.PostConstruct;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -47,47 +48,56 @@ public class SchedulerService {
     @PostConstruct
     public void initializeSchedulerConfig() {
         try {
-            log.info("Initializing scheduler configuration...");
+            log.info("🔧 Initializing scheduler configuration - MANUAL START ONLY...");
 
             if (schedulerConfigRepository == null) {
                 log.error("SchedulerConfigRepository is null!");
                 return;
             }
 
-            if (!schedulerConfigRepository.existsById(CONFIG_NAME)) {
-                log.info("Creating new scheduler configuration");
-                SchedulerConfigEntity config = new SchedulerConfigEntity();
+            // ✅ ALWAYS CREATE/RESET CONFIG AS DISABLED ON STARTUP
+            Optional<SchedulerConfigEntity> existingConfig = schedulerConfigRepository.findById(CONFIG_NAME);
+            SchedulerConfigEntity config;
+            
+            if (existingConfig.isPresent()) {
+                config = existingConfig.get();
+                log.info("🔄 Resetting existing scheduler configuration to DISABLED state");
+            } else {
+                log.info("🆕 Creating new scheduler configuration in DISABLED state");
+                config = new SchedulerConfigEntity();
                 config.setConfigName(CONFIG_NAME);
-                config.setEnabled(false);
-                config.setIntervalMinutes(30);
-                config.setStartFromTime(LocalDateTime.now().minusDays(30));
-                schedulerConfigRepository.save(config);
-                log.info("Scheduler configuration created successfully");
             }
             
-            // ✅ ENSURE SCHEDULER IS STARTED BUT NO TRIGGERS ARE ACTIVE
-            if (!scheduler.isStarted()) {
-                log.info("🔄 Starting Quartz scheduler (without triggers)...");
+            // ✅ FORCE DISABLED STATE ON STARTUP
+            config.setEnabled(false);
+            config.setIntervalMinutes(30); // Default interval
+            if (config.getStartFromTime() == null) {
+                config.setStartFromTime(LocalDateTime.now().minusDays(30));
+            }
+            config.setLastStopTime(LocalDateTime.now()); // Mark as stopped on startup
+            config.setNextRunTime(null); // Clear any scheduled runs
+            
+            schedulerConfigRepository.save(config);
+            log.info("✅ Scheduler configuration saved in DISABLED state");
+            
+            // ✅ START QUARTZ SCHEDULER BUT WITH NO ACTIVE TRIGGERS
+            if (scheduler != null && !scheduler.isStarted()) {
+                log.info("🔄 Starting Quartz scheduler framework (without active jobs)...");
                 scheduler.start();
-                log.info("✅ Quartz scheduler started - waiting for manual start command");
+                log.info("✅ Quartz scheduler framework started - waiting for manual trigger");
             }
             
             // ✅ REMOVE ANY EXISTING TRIGGERS FROM PREVIOUS SESSIONS
-            if (scheduler.checkExists(TriggerKey.triggerKey(TRIGGER_NAME, TRIGGER_GROUP))) {
-                log.info("🧹 Removing existing trigger from previous session...");
+            if (scheduler != null && scheduler.checkExists(TriggerKey.triggerKey(TRIGGER_NAME, TRIGGER_GROUP))) {
+                log.info("🧹 Removing any existing triggers from previous session...");
                 scheduler.unscheduleJob(TriggerKey.triggerKey(TRIGGER_NAME, TRIGGER_GROUP));
-                log.info("✅ Previous trigger removed");
+                log.info("✅ Previous triggers cleaned up");
             }
             
-            // ✅ MARK CONFIG AS DISABLED IF IT WAS LEFT ENABLED
-            SchedulerConfigEntity config = getSchedulerConfig();
-            if (config.isEnabled()) {
-                log.info("🛑 Marking scheduler as disabled (was left enabled from previous session)");
-                config.setEnabled(false);
-                schedulerConfigRepository.save(config);
-            }
+            // ✅ ENSURE JOB IS REGISTERED BUT NOT SCHEDULED
+            ensureJobIsRegistered();
             
-            log.info("✅ Scheduler initialization complete - ready for manual start");
+            log.info("✅ Scheduler initialization complete - Ready for MANUAL START via frontend");
             
         } catch (Exception e) {
             log.error("❌ Error initializing scheduler configuration", e);
@@ -97,265 +107,263 @@ public class SchedulerService {
     private void ensureJobIsRegistered() {
         try {
             if (scheduler == null) {
-                log.warn("Scheduler not available for job registration");
+                log.warn("⚠️ Scheduler not available for job registration");
                 return;
             }
 
             JobKey jobKey = new JobKey(JOB_NAME, JOB_GROUP);
 
             if (!scheduler.checkExists(jobKey)) {
-                log.info("Job does not exist, registering it...");
+                log.info("📝 Registering job definition (without scheduling)...");
 
-                // Create job detail if not injected
                 JobDetail jobDetail = bookingProcessorJobDetail;
                 if (jobDetail == null) {
-                    log.info("Creating JobDetail manually");
+                    log.info("🔧 Creating JobDetail manually");
                     jobDetail = JobBuilder.newJob(BookingProcessorJob.class)
                             .withIdentity(JOB_NAME, JOB_GROUP)
-                            .withDescription("Job to process bookings")
-                            .storeDurably(true)
-                            .requestRecovery(true)
+                            .withDescription("Job to process bookings - Manual start only")
+                            .storeDurably(true) // ✅ Important: allows job to exist without trigger
+                            .requestRecovery(false) // ✅ Don't auto-recover on startup
                             .build();
                 }
 
                 scheduler.addJob(jobDetail, true);
-                log.info("Job registered successfully: {}", JOB_NAME);
+                log.info("✅ Job registered successfully: {} (not scheduled)", JOB_NAME);
             } else {
-                log.info("Job already exists: {}", JOB_NAME);
+                log.info("✅ Job already exists: {} (checking if scheduled...)", JOB_NAME);
+                
+                // ✅ DOUBLE CHECK: Remove any triggers even if job exists
+                if (scheduler.checkExists(TriggerKey.triggerKey(TRIGGER_NAME, TRIGGER_GROUP))) {
+                    scheduler.unscheduleJob(TriggerKey.triggerKey(TRIGGER_NAME, TRIGGER_GROUP));
+                    log.info("🧹 Removed existing trigger for job");
+                }
             }
         } catch (SchedulerException e) {
-            log.error("Error ensuring job is registered", e);
+            log.error("❌ Error ensuring job is registered", e);
         }
     }
 
-@Transactional
-public SchedulerStatusDto startScheduler(int intervalMinutes) {
-    try {
-        log.info("🚀 User requested scheduler start with interval: {} minutes", intervalMinutes);
-        
-        // Check if already running
-        if (isSchedulerRunning()) {
-            log.warn("⚠️ Scheduler is already running");
+    @Transactional
+    public SchedulerStatusDto startScheduler(int intervalMinutes) {
+        try {
+            log.info("🚀 MANUAL START requested with interval: {} minutes", intervalMinutes);
+            
+            // ✅ Validate interval
+            if (intervalMinutes < 1) {
+                throw new IllegalArgumentException("Interval must be at least 1 minute");
+            }
+            
+            // ✅ Check if already running
+            if (isSchedulerRunning()) {
+                log.warn("⚠️ Scheduler is already running");
+                return getSchedulerStatus();
+            }
+            
+            // ✅ Ensure Quartz is started
+            if (scheduler != null && !scheduler.isStarted()) {
+                log.info("🔄 Starting Quartz scheduler framework...");
+                scheduler.start();
+            }
+            
+            // ✅ Ensure job is registered
+            ensureJobIsRegistered();
+            
+            // ✅ Create and schedule trigger
+            Trigger trigger = TriggerBuilder.newTrigger()
+                .withIdentity(TRIGGER_NAME, TRIGGER_GROUP)
+                .forJob(JOB_NAME, JOB_GROUP)
+                .withSchedule(SimpleScheduleBuilder.simpleSchedule()
+                    .withIntervalInMinutes(intervalMinutes)
+                    .repeatForever())
+                .startNow() // ✅ Start immediately when manually triggered
+                .build();
+
+            if (scheduler != null) {
+                scheduler.scheduleJob(trigger);
+                log.info("✅ Trigger scheduled successfully");
+            }
+            
+            // ✅ Update configuration
+            SchedulerConfigEntity config = getSchedulerConfig();
+            config.setEnabled(true);
+            config.setIntervalMinutes(intervalMinutes);
+            config.setLastStartTime(LocalDateTime.now());
+            config.setLastStopTime(null); // Clear stop time when starting
+            
+            if (trigger.getNextFireTime() != null) {
+                config.setNextRunTime(trigger.getNextFireTime().toInstant()
+                    .atZone(ZoneId.systemDefault()).toLocalDateTime());
+            }
+            
+            schedulerConfigRepository.save(config);
+            
+            log.info("✅ Scheduler started successfully with {} minute intervals", intervalMinutes);
+            log.info("📅 Next execution scheduled for: {}", config.getNextRunTime());
+            
             return getSchedulerStatus();
+            
+        } catch (Exception e) {
+            log.error("❌ Error starting scheduler", e);
+            throw new RuntimeException("Failed to start scheduler: " + e.getMessage());
         }
-        
-        // Ensure scheduler is started
-        if (!scheduler.isStarted()) {
-            log.info("🔄 Starting Quartz scheduler...");
-            scheduler.start();
-        }
-        
-        // Create trigger for the job
-        Trigger trigger = TriggerBuilder.newTrigger()
-            .withIdentity(TRIGGER_NAME, TRIGGER_GROUP)
-            .forJob(JOB_NAME, JOB_GROUP)
-            .withSchedule(SimpleScheduleBuilder.simpleSchedule()
-                .withIntervalInMinutes(intervalMinutes)
-                .repeatForever())
-            .startNow()
-            .build();
-
-        // Schedule the job
-        scheduler.scheduleJob(trigger);
-        
-        // Update configuration
-        SchedulerConfigEntity config = getSchedulerConfig();
-        config.setEnabled(true);
-        config.setIntervalMinutes(intervalMinutes);
-        config.setLastStartTime(LocalDateTime.now());
-        
-        // ✅ Set next run time based on trigger
-        if (trigger.getNextFireTime() != null) {
-            config.setNextRunTime(trigger.getNextFireTime().toInstant()
-                .atZone(ZoneId.systemDefault()).toLocalDateTime());
-        }
-        
-        schedulerConfigRepository.save(config);
-        
-        log.info("✅ Scheduler started successfully with {} minute intervals", intervalMinutes);
-        
-        return getSchedulerStatus();
-        
-    } catch (Exception e) {
-        log.error("❌ Error starting scheduler", e);
-        throw new RuntimeException("Failed to start scheduler: " + e.getMessage());
     }
-}
 
-/**
- * ✅ Stop the scheduler (FIXED)
- */
-@Transactional
-public SchedulerStatusDto stopScheduler() {
-    try {
-        log.info("🛑 User requested scheduler stop");
-        
-        // Remove the trigger
-        if (scheduler.checkExists(TriggerKey.triggerKey(TRIGGER_NAME, TRIGGER_GROUP))) {
-            scheduler.unscheduleJob(TriggerKey.triggerKey(TRIGGER_NAME, TRIGGER_GROUP));
-            log.info("✅ Trigger removed");
+    @Transactional
+    public SchedulerStatusDto stopScheduler() {
+        try {
+            log.info("🛑 MANUAL STOP requested");
+            
+            // ✅ Remove the trigger to stop scheduled executions
+            if (scheduler != null && scheduler.checkExists(TriggerKey.triggerKey(TRIGGER_NAME, TRIGGER_GROUP))) {
+                scheduler.unscheduleJob(TriggerKey.triggerKey(TRIGGER_NAME, TRIGGER_GROUP));
+                log.info("✅ Trigger removed - no more scheduled executions");
+            } else {
+                log.info("ℹ️ No active trigger found to remove");
+            }
+            
+            // ✅ Update configuration
+            SchedulerConfigEntity config = getSchedulerConfig();
+            config.setEnabled(false);
+            config.setLastStopTime(LocalDateTime.now());
+            config.setNextRunTime(null); // Clear next run time
+            schedulerConfigRepository.save(config);
+            
+            log.info("✅ Scheduler stopped successfully");
+            
+            return getSchedulerStatus();
+            
+        } catch (Exception e) {
+            log.error("❌ Error stopping scheduler", e);
+            throw new RuntimeException("Failed to stop scheduler: " + e.getMessage());
         }
-        
-        // Update configuration
-        SchedulerConfigEntity config = getSchedulerConfig();
-        config.setEnabled(false);
-        config.setLastStopTime(LocalDateTime.now());
-        config.setNextRunTime(null);  // ✅ Clear next run time when stopped
-        schedulerConfigRepository.save(config);
-        
-        log.info("✅ Scheduler stopped successfully");
-        
-        return getSchedulerStatus();
-        
-    } catch (Exception e) {
-        log.error("❌ Error stopping scheduler", e);
-        throw new RuntimeException("Failed to stop scheduler: " + e.getMessage());
     }
-}
 
-/**
- * ✅ Get current scheduler status (FIXED)
- */
     public SchedulerStatusDto getSchedulerStatus() {
-    try {
-        boolean isRunning = isSchedulerRunning();
-        SchedulerConfigEntity config = getSchedulerConfig();
-        
-        SchedulerStatusDto status = new SchedulerStatusDto();
-        
-        // ✅ Basic job information
-        status.setJobName(JOB_NAME);
-        status.setJobGroup(JOB_GROUP);
-        status.setEnabled(isRunning);
-        status.setRunning(isRunning);
-        status.setStatus(isRunning ? "RUNNING" : "STOPPED");
-        
-        // ✅ Configuration fields
-        status.setIntervalMinutes(config.getIntervalMinutes());
-        status.setLastStartTime(config.getLastStartTime());
-        status.setLastStopTime(config.getLastStopTime());  // Now this method will exist
-        status.setLastRunTime(config.getLastRunTime());
-        status.setNextRunTime(config.getNextRunTime());
-        status.setStartFromTime(config.getStartFromTime());
-        
-        // ✅ Trigger information
-        if (isRunning) {
-            try {
-                Trigger trigger = scheduler.getTrigger(TriggerKey.triggerKey(TRIGGER_NAME, TRIGGER_GROUP));
-                if (trigger != null) {
-                    // Next fire time
-                    if (trigger.getNextFireTime() != null) {
-                        status.setNextFireTime(trigger.getNextFireTime().toInstant()
-                            .atZone(ZoneId.systemDefault()).toLocalDateTime());
-                    }
-                    
-                    // Trigger state
-                    try {
+        try {
+            boolean isRunning = isSchedulerRunning();
+            SchedulerConfigEntity config = getSchedulerConfig();
+            
+            SchedulerStatusDto status = new SchedulerStatusDto();
+            
+            // ✅ Basic job information
+            status.setJobName(JOB_NAME);
+            status.setJobGroup(JOB_GROUP);
+            status.setEnabled(config.isEnabled());
+            status.setRunning(isRunning);
+            status.setStatus(isRunning ? "RUNNING" : "STOPPED");
+            
+            // ✅ Configuration fields
+            status.setIntervalMinutes(config.getIntervalMinutes());
+            status.setLastStartTime(config.getLastStartTime());
+            status.setLastStopTime(config.getLastStopTime());
+            status.setLastRunTime(config.getLastRunTime());
+            status.setNextRunTime(config.getNextRunTime());
+            status.setStartFromTime(config.getStartFromTime());
+            
+            // ✅ Trigger information (only if running)
+            if (isRunning && scheduler != null) {
+                try {
+                    Trigger trigger = scheduler.getTrigger(TriggerKey.triggerKey(TRIGGER_NAME, TRIGGER_GROUP));
+                    if (trigger != null) {
+                        if (trigger.getNextFireTime() != null) {
+                            status.setNextFireTime(trigger.getNextFireTime().toInstant()
+                                .atZone(ZoneId.systemDefault()).toLocalDateTime());
+                        }
+                        
                         Trigger.TriggerState triggerState = scheduler.getTriggerState(trigger.getKey());
                         status.setTriggerState(triggerState.name());
-                    } catch (Exception e) {
-                        status.setTriggerState("UNKNOWN");
-                        log.debug("Could not get trigger state: {}", e.getMessage());
+                    } else {
+                        status.setTriggerState("NOT_FOUND");
                     }
-                } else {
-                    status.setTriggerState("NOT_FOUND");
+                } catch (Exception e) {
+                    status.setTriggerState("ERROR");
+                    log.debug("Could not get trigger information: {}", e.getMessage());
                 }
-            } catch (Exception e) {
-                status.setTriggerState("ERROR");
-                log.debug("Could not get trigger information: {}", e.getMessage());
+            } else {
+                status.setTriggerState("NONE");
             }
-        } else {
-            status.setTriggerState("NONE");
-        }
-        
-        // ✅ Execution statistics from job history
-        try {
-            List<JobExecutionHistoryEntity> allExecutions = jobHistoryRepository
-                .findByJobNameAndJobGroupOrderByStartTimeDesc(JOB_NAME, JOB_GROUP);
             
-            status.setTotalExecutions(allExecutions.size());
-            
-            status.setSuccessfulExecutions(allExecutions.stream()
-                .mapToLong(exec -> exec.getStatus() == JobExecutionHistoryEntity.ExecutionStatus.COMPLETED ? 1 : 0)
-                .sum());
+            // ✅ Execution statistics
+            try {
+                List<JobExecutionHistoryEntity> allExecutions = jobHistoryRepository
+                    .findByJobNameAndJobGroupOrderByStartTimeDesc(JOB_NAME, JOB_GROUP);
                 
-            status.setFailedExecutions(allExecutions.stream()
-                .mapToLong(exec -> exec.getStatus() == JobExecutionHistoryEntity.ExecutionStatus.FAILED ? 1 : 0)
-                .sum());
-            
-            // Get last successful run
-            allExecutions.stream()
-                .filter(exec -> exec.getStatus() == JobExecutionHistoryEntity.ExecutionStatus.COMPLETED)
-                .findFirst()
-                .ifPresent(exec -> status.setLastSuccessfulRun(exec.getEndTime()));
-            
-            // Get last error message
-            allExecutions.stream()
-                .filter(exec -> exec.getStatus() == JobExecutionHistoryEntity.ExecutionStatus.FAILED)
-                .findFirst()
-                .ifPresent(exec -> status.setLastErrorMessage(exec.getErrorMessage()));
+                status.setTotalExecutions(allExecutions.size());
+                status.setSuccessfulExecutions(allExecutions.stream()
+                    .mapToLong(exec -> exec.getStatus() == JobExecutionHistoryEntity.ExecutionStatus.COMPLETED ? 1 : 0)
+                    .sum());
+                status.setFailedExecutions(allExecutions.stream()
+                    .mapToLong(exec -> exec.getStatus() == JobExecutionHistoryEntity.ExecutionStatus.FAILED ? 1 : 0)
+                    .sum());
                 
+                // Get last successful run
+                allExecutions.stream()
+                    .filter(exec -> exec.getStatus() == JobExecutionHistoryEntity.ExecutionStatus.COMPLETED)
+                    .findFirst()
+                    .ifPresent(exec -> status.setLastSuccessfulRun(exec.getEndTime()));
+                
+                // Get last error
+                allExecutions.stream()
+                    .filter(exec -> exec.getStatus() == JobExecutionHistoryEntity.ExecutionStatus.FAILED)
+                    .findFirst()
+                    .ifPresent(exec -> status.setLastErrorMessage(exec.getErrorMessage()));
+                
+            } catch (Exception e) {
+                log.debug("Could not get execution statistics: {}", e.getMessage());
+                status.setTotalExecutions(0);
+                status.setSuccessfulExecutions(0);
+                status.setFailedExecutions(0);
+            }
+            
+            return status;
+            
         } catch (Exception e) {
-            log.debug("Could not get execution statistics: {}", e.getMessage());
-            // Set defaults on error
-            status.setTotalExecutions(0);
-            status.setSuccessfulExecutions(0);
-            status.setFailedExecutions(0);
+            log.error("❌ Error getting scheduler status", e);
+            
+            SchedulerStatusDto errorStatus = new SchedulerStatusDto();
+            errorStatus.setJobName(JOB_NAME);
+            errorStatus.setJobGroup(JOB_GROUP);
+            errorStatus.setEnabled(false);
+            errorStatus.setRunning(false);
+            errorStatus.setStatus("ERROR");
+            errorStatus.setTriggerState("ERROR");
+            errorStatus.setIntervalMinutes(30);
+            errorStatus.setTotalExecutions(0);
+            errorStatus.setSuccessfulExecutions(0);
+            errorStatus.setFailedExecutions(0);
+            return errorStatus;
         }
-        
-        return status;
-        
-    } catch (Exception e) {
-        log.error("❌ Error getting scheduler status", e);
-        
-        // Return default status on error
-        SchedulerStatusDto errorStatus = new SchedulerStatusDto();
-        errorStatus.setJobName(JOB_NAME);
-        errorStatus.setJobGroup(JOB_GROUP);
-        errorStatus.setEnabled(false);
-        errorStatus.setRunning(false);
-        errorStatus.setStatus("ERROR");
-        errorStatus.setIntervalMinutes(30);
-        errorStatus.setTriggerState("ERROR");
-        errorStatus.setTotalExecutions(0);
-        errorStatus.setSuccessfulExecutions(0);
-        errorStatus.setFailedExecutions(0);
-        return errorStatus;
     }
-}
 
     @Transactional
     public void triggerJobNow() {
         try {
-            log.info("Triggering job manually");
+            log.info("🎯 MANUAL JOB TRIGGER requested");
 
             if (scheduler == null) {
                 throw new RuntimeException("Scheduler not available");
             }
 
-            // Ensure job is registered
             ensureJobIsRegistered();
 
             JobKey jobKey = new JobKey(JOB_NAME, JOB_GROUP);
             if (scheduler.checkExists(jobKey)) {
                 scheduler.triggerJob(jobKey);
-                log.info("Job triggered manually: {}", JOB_NAME);
+                log.info("✅ Job triggered manually: {}", JOB_NAME);
             } else {
-                log.error("Job does not exist: {}", JOB_NAME);
+                log.error("❌ Job does not exist: {}", JOB_NAME);
                 throw new RuntimeException("Job does not exist: " + JOB_NAME);
             }
-        } catch (SchedulerException e) {
-            log.error("SchedulerException triggering job manually", e);
-            throw new RuntimeException("Failed to trigger job manually: " + e.getMessage(), e);
         } catch (Exception e) {
-            log.error("General error triggering job manually", e);
+            log.error("❌ Error triggering job manually", e);
             throw new RuntimeException("Failed to trigger job manually: " + e.getMessage(), e);
         }
     }
 
     public boolean isSchedulerRunning() {
         try {
-            return scheduler.isStarted() && 
+            return scheduler != null && 
+                   scheduler.isStarted() && 
                    scheduler.checkExists(TriggerKey.triggerKey(TRIGGER_NAME, TRIGGER_GROUP));
         } catch (Exception e) {
             log.error("❌ Error checking scheduler status", e);
@@ -368,7 +376,6 @@ public SchedulerStatusDto stopScheduler() {
                 .orElseThrow(() -> new RuntimeException("Scheduler configuration not found"));
     }
 
-    // Simplified methods for other operations
     public SchedulerStatusDto updateSchedulerConfig(boolean enabled, int intervalMinutes, LocalDateTime startFromTime) {
         try {
             if (intervalMinutes < 1) {
@@ -376,7 +383,6 @@ public SchedulerStatusDto stopScheduler() {
             }
 
             SchedulerConfigEntity config = getSchedulerConfig();
-            config.setEnabled(enabled);
             config.setIntervalMinutes(intervalMinutes);
             if (startFromTime != null) {
                 config.setStartFromTime(startFromTime);
@@ -398,38 +404,52 @@ public SchedulerStatusDto stopScheduler() {
         try {
             log.info("📊 Getting job history: page={}, size={}, days={}", page, size, days);
             
-            // Get all executions for this job
-            List<JobExecutionHistoryEntity> executions = jobHistoryRepository
-                    .findByJobNameAndJobGroupOrderByStartTimeDesc(JOB_NAME, JOB_GROUP);
+            List<JobExecutionHistoryEntity> executions;
             
-            log.info("📊 Found {} total job executions in history", executions.size());
-            
-            // Convert to DTOs
-            List<JobExecutionDto> executionDtos = executions.stream()
-                    .map(this::convertToDto)
-                    .collect(Collectors.toList());
-            
-            // Apply pagination manually (since we're not using Spring Data paging here)
-            int start = page * size;
-            int end = Math.min(start + size, executionDtos.size());
-            
-            List<JobExecutionDto> paginatedResults = executionDtos.subList(start, end);
-            
-            SchedulerHistoryResponse response = new SchedulerHistoryResponse();
-            response.setExecutions(paginatedResults);
-            response.setTotalCount(executions.size());
-            response.setPage(page);
-            response.setSize(size);
-            
-            log.info("📊 Returning {} executions (page {} of total {})", 
-                    paginatedResults.size(), page, executions.size());
-            
-            return response;
+            if (days != null && days > 0) {
+                LocalDateTime cutoff = LocalDateTime.now().minusDays(days);
+                Pageable pageable = PageRequest.of(page, size);
+                Page<JobExecutionHistoryEntity> pagedExecutions = jobHistoryRepository
+                        .findByStartTimeAfter(cutoff, pageable);
+                
+                executions = pagedExecutions.getContent();
+                
+                List<JobExecutionDto> executionDtos = executions.stream()
+                        .map(this::convertToDto)
+                        .collect(Collectors.toList());
+                
+                SchedulerHistoryResponse response = new SchedulerHistoryResponse();
+                response.setExecutions(executionDtos);
+                response.setTotalCount(pagedExecutions.getTotalElements());
+                response.setPage(page);
+                response.setSize(size);
+                
+                return response;
+            } else {
+                executions = jobHistoryRepository
+                        .findByJobNameAndJobGroupOrderByStartTimeDesc(JOB_NAME, JOB_GROUP);
+                
+                List<JobExecutionDto> executionDtos = executions.stream()
+                        .map(this::convertToDto)
+                        .collect(Collectors.toList());
+                
+                int start = page * size;
+                int end = Math.min(start + size, executionDtos.size());
+                
+                List<JobExecutionDto> paginatedResults = executionDtos.subList(start, end);
+                
+                SchedulerHistoryResponse response = new SchedulerHistoryResponse();
+                response.setExecutions(paginatedResults);
+                response.setTotalCount(executions.size());
+                response.setPage(page);
+                response.setSize(size);
+                
+                return response;
+            }
             
         } catch (Exception e) {
             log.error("❌ Error getting job history", e);
             
-            // Return empty response instead of throwing exception
             SchedulerHistoryResponse emptyResponse = new SchedulerHistoryResponse();
             emptyResponse.setExecutions(List.of());
             emptyResponse.setTotalCount(0);
@@ -439,51 +459,45 @@ public SchedulerStatusDto stopScheduler() {
         }
     }
 
-    // Stub methods for job execution recording
+    // ✅ Job execution recording methods (unchanged)
     public LocalDateTime getProcessingStartTime(String jobName) {
-    try {
-        // Get the last successful execution
-        List<JobExecutionHistoryEntity> executions = jobHistoryRepository
-            .findByJobNameAndJobGroupOrderByStartTimeDesc(jobName, JOB_GROUP);
-        
-        // Find the last successful execution with a processToTime
-        Optional<JobExecutionHistoryEntity> lastSuccessful = executions.stream()
-            .filter(exec -> exec.getStatus() == JobExecutionHistoryEntity.ExecutionStatus.COMPLETED)
-            .filter(exec -> exec.getProcessToTime() != null)
-            .findFirst();
-        
-        if (lastSuccessful.isPresent()) {
-            LocalDateTime lastProcessedTo = lastSuccessful.get().getProcessToTime();
-            log.info("📅 Using last successful run end time: {}", lastProcessedTo);
-            return lastProcessedTo;
+        try {
+            List<JobExecutionHistoryEntity> executions = jobHistoryRepository
+                .findByJobNameAndJobGroupOrderByStartTimeDesc(jobName, JOB_GROUP);
+            
+            Optional<JobExecutionHistoryEntity> lastSuccessful = executions.stream()
+                .filter(exec -> exec.getStatus() == JobExecutionHistoryEntity.ExecutionStatus.COMPLETED)
+                .filter(exec -> exec.getProcessToTime() != null)
+                .findFirst();
+            
+            if (lastSuccessful.isPresent()) {
+                LocalDateTime lastProcessedTo = lastSuccessful.get().getProcessToTime();
+                log.info("📅 Using last successful run end time: {}", lastProcessedTo);
+                return lastProcessedTo;
+            }
+            
+            SchedulerConfigEntity config = getSchedulerConfig();
+            LocalDateTime startFromTime = config.getStartFromTime();
+            
+            if (startFromTime != null) {
+                log.info("📅 Using configured start time: {}", startFromTime);
+                return startFromTime;
+            }
+            
+            LocalDateTime defaultStart = LocalDateTime.now().minusDays(30);
+            log.info("📅 Using default start time (30 days ago): {}", defaultStart);
+            return defaultStart;
+            
+        } catch (Exception e) {
+            log.error("❌ Error getting processing start time, using default", e);
+            return LocalDateTime.now().minusDays(30);
         }
-        
-        // Get from config or default to 30 days ago
-        SchedulerConfigEntity config = getSchedulerConfig();
-        LocalDateTime startFromTime = config.getStartFromTime();
-        
-        if (startFromTime != null) {
-            log.info("📅 Using configured start time: {}", startFromTime);
-            return startFromTime;
-        }
-        
-        // Default fallback
-        LocalDateTime defaultStart = LocalDateTime.now().minusDays(30);
-        log.info("📅 Using default start time (30 days ago): {}", defaultStart);
-        return defaultStart;
-        
-    } catch (Exception e) {
-        log.error("❌ Error getting processing start time, using default", e);
-        return LocalDateTime.now().minusDays(30);
     }
-}
 
     @Transactional
     public Long recordJobStart(String jobName, String jobGroup, String triggerName,
                             String triggerGroup, LocalDateTime startTime) {
         try {
-            log.info("📝 Recording job start: {} in group {}", jobName, jobGroup);
-            
             JobExecutionHistoryEntity execution = new JobExecutionHistoryEntity();
             execution.setJobName(jobName);
             execution.setJobGroup(jobGroup);
@@ -499,71 +513,7 @@ public SchedulerStatusDto stopScheduler() {
             
         } catch (Exception e) {
             log.error("❌ Error recording job start for {}: {}", jobName, e.getMessage(), e);
-            // Return null to indicate failure, but don't crash the job
             return null;
-        }
-    }
-
-        public boolean isJobCurrentlyRunning(String jobName, String jobGroup) {
-        try {
-            // Check database for STARTED jobs without end time
-            List<JobExecutionHistoryEntity> runningJobs = jobHistoryRepository
-                .findByJobNameAndJobGroupAndStatus(jobName, jobGroup, 
-                    JobExecutionHistoryEntity.ExecutionStatus.STARTED);
-            
-            // Filter for jobs that started recently (within last hour) and have no end time
-            LocalDateTime oneHourAgo = LocalDateTime.now().minusHours(1);
-            
-            long activeJobs = runningJobs.stream()
-                .filter(job -> job.getEndTime() == null) // No end time means still running
-                .filter(job -> job.getStartTime().isAfter(oneHourAgo)) // Started recently
-                .count();
-            
-            if (activeJobs > 0) {
-                log.warn("⚠️ Found {} active job(s) for {}/{}", activeJobs, jobName, jobGroup);
-                return true;
-            }
-            
-            return false;
-            
-        } catch (Exception e) {
-            log.error("❌ Error checking for running jobs: {}", e.getMessage());
-            return false;
-        }
-    }
-
-    @Transactional
-    public void cleanupStaleJobs() {
-        try {
-            LocalDateTime staleThreshold = LocalDateTime.now().minusHours(2);
-            
-            List<JobExecutionHistoryEntity> staleJobs = jobHistoryRepository
-                .findByStatusAndStartTimeBefore(
-                    JobExecutionHistoryEntity.ExecutionStatus.STARTED, 
-                    staleThreshold);
-            
-            for (JobExecutionHistoryEntity staleJob : staleJobs) {
-                log.warn("🧹 Marking stale job as failed: ID={}, started={}", 
-                        staleJob.getId(), staleJob.getStartTime());
-                
-                staleJob.setStatus(JobExecutionHistoryEntity.ExecutionStatus.FAILED);
-                staleJob.setEndTime(LocalDateTime.now());
-                staleJob.setErrorMessage("Job marked as failed due to stale status");
-                
-                if (staleJob.getStartTime() != null) {
-                    long durationMs = java.time.Duration.between(staleJob.getStartTime(), LocalDateTime.now()).toMillis();
-                    staleJob.setDurationMs(durationMs);
-                }
-                
-                jobHistoryRepository.save(staleJob);
-            }
-            
-            if (!staleJobs.isEmpty()) {
-                log.info("🧹 Cleaned up {} stale job records", staleJobs.size());
-            }
-            
-        } catch (Exception e) {
-            log.error("❌ Error cleaning up stale jobs: {}", e.getMessage());
         }
     }
 
@@ -577,8 +527,6 @@ public SchedulerStatusDto stopScheduler() {
         }
         
         try {
-            log.info("📝 Recording job completion for execution ID: {}", executionId);
-            
             Optional<JobExecutionHistoryEntity> executionOpt = jobHistoryRepository.findById(executionId);
             if (executionOpt.isEmpty()) {
                 log.error("❌ Execution record not found for ID: {}", executionId);
@@ -592,7 +540,6 @@ public SchedulerStatusDto stopScheduler() {
             execution.setProcessFromTime(processFromTime);
             execution.setProcessToTime(processToTime);
             
-            // Calculate duration
             if (execution.getStartTime() != null) {
                 long durationMs = java.time.Duration.between(execution.getStartTime(), endTime).toMillis();
                 execution.setDurationMs(durationMs);
@@ -600,14 +547,12 @@ public SchedulerStatusDto stopScheduler() {
             
             jobHistoryRepository.save(execution);
             
-            log.info("✅ Recorded job completion: {} records processed in {}ms", 
-                    recordsProcessed, execution.getDurationMs());
+            log.info("✅ Recorded job completion: {} records processed", recordsProcessed);
             
         } catch (Exception e) {
             log.error("❌ Error recording job completion for execution {}: {}", executionId, e.getMessage(), e);
         }
     }
-
 
     @Transactional
     public void recordJobFailure(Long executionId, LocalDateTime endTime, String errorMessage) {
@@ -617,8 +562,6 @@ public SchedulerStatusDto stopScheduler() {
         }
         
         try {
-            log.info("📝 Recording job failure for execution ID: {}", executionId);
-            
             Optional<JobExecutionHistoryEntity> executionOpt = jobHistoryRepository.findById(executionId);
             if (executionOpt.isEmpty()) {
                 log.error("❌ Execution record not found for ID: {}", executionId);
@@ -630,7 +573,6 @@ public SchedulerStatusDto stopScheduler() {
             execution.setStatus(JobExecutionHistoryEntity.ExecutionStatus.FAILED);
             execution.setErrorMessage(errorMessage);
             
-            // Calculate duration
             if (execution.getStartTime() != null) {
                 long durationMs = java.time.Duration.between(execution.getStartTime(), endTime).toMillis();
                 execution.setDurationMs(durationMs);
@@ -638,32 +580,26 @@ public SchedulerStatusDto stopScheduler() {
             
             jobHistoryRepository.save(execution);
             
-            log.info("❌ Recorded job failure after {}ms: {}", execution.getDurationMs(), errorMessage);
+            log.info("❌ Recorded job failure: {}", errorMessage);
             
         } catch (Exception e) {
             log.error("❌ Error recording job failure for execution {}: {}", executionId, e.getMessage(), e);
         }
     }
 
-
     @Transactional
     public void updateLastRunTime(String jobName, LocalDateTime lastRunTime) {
         try {
-            log.info("📝 Updating last run time for {}: {}", jobName, lastRunTime);
-            
             SchedulerConfigEntity config = getSchedulerConfig();
             config.setLastRunTime(lastRunTime);
             schedulerConfigRepository.save(config);
-            
-            log.info("✅ Updated last run time to: {}", lastRunTime);
             
         } catch (Exception e) {
             log.error("❌ Error updating last run time for {}: {}", jobName, e.getMessage(), e);
         }
     }
 
-
-        private JobExecutionDto convertToDto(JobExecutionHistoryEntity entity) {
+    private JobExecutionDto convertToDto(JobExecutionHistoryEntity entity) {
         JobExecutionDto dto = new JobExecutionDto();
         dto.setId(entity.getId());
         dto.setJobName(entity.getJobName());
@@ -679,5 +615,5 @@ public SchedulerStatusDto stopScheduler() {
         dto.setProcessFromTime(entity.getProcessFromTime());
         dto.setProcessToTime(entity.getProcessToTime());
         return dto;
-        }
+    }
 }

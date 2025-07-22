@@ -22,6 +22,12 @@ public interface JobExecutionHistoryRepository extends JpaRepository<JobExecutio
 
     long countByStatus(JobExecutionHistoryEntity.ExecutionStatus status);
 
+    // Fixed: Added missing method for finding by job name, group, and status
+    List<JobExecutionHistoryEntity> findByJobNameAndJobGroupAndStatus(String jobName, String jobGroup, JobExecutionHistoryEntity.ExecutionStatus status);
+
+    // Fixed: Added missing method for finding by status and start time
+    List<JobExecutionHistoryEntity> findByStatusAndStartTimeBefore(JobExecutionHistoryEntity.ExecutionStatus status, LocalDateTime startTime);
+
     @Query("SELECT j FROM JobExecutionHistoryEntity j WHERE j.jobName = :jobName AND j.jobGroup = :jobGroup ORDER BY j.startTime DESC")
     List<JobExecutionHistoryEntity> findJobHistory(@Param("jobName") String jobName, @Param("jobGroup") String jobGroup);
 
@@ -34,4 +40,3 @@ public interface JobExecutionHistoryRepository extends JpaRepository<JobExecutio
     @Query("SELECT j FROM JobExecutionHistoryEntity j WHERE j.jobName = :jobName AND j.jobGroup = :jobGroup AND j.status = 'COMPLETED' ORDER BY j.endTime DESC LIMIT 1")
     JobExecutionHistoryEntity findLastSuccessfulExecution(@Param("jobName") String jobName, @Param("jobGroup") String jobGroup);
 }
-
