@@ -1,26 +1,59 @@
 package vine.vine.config;
 
-import java.io.FileWriter;
-import java.io.IOException;
-import java.time.LocalDateTime;
-
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import lombok.extern.slf4j.Slf4j;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 
-@Slf4j
 @Component
+@Slf4j
 public class ServiceLog {
 
-    public void logError(String message, String fileName, boolean includeTimestamp) {
-        String entry = includeTimestamp
-                ? String.format("[%s] %s%n", LocalDateTime.now(), message)
-                : message + System.lineSeparator();
+    private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-        try (FileWriter writer = new FileWriter(fileName, true)) {
-            writer.write(entry);
+    public void logError(String message, String fileName, boolean appendTimestamp) {
+        try {
+            String logMessage = message;
+            if (appendTimestamp) {
+                logMessage = LocalDateTime.now().format(TIMESTAMP_FORMAT) + " - " + message;
+            }
+            logMessage += System.lineSeparator();
+
+            Path logPath = Paths.get("logs", fileName);
+            Files.createDirectories(logPath.getParent());
+
+            Files.write(logPath, logMessage.getBytes(),
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.APPEND);
+
         } catch (IOException e) {
-            log.error("Failed to write to {}: {}", fileName, e.getMessage(), e);
+            log.error("Failed to write to log file: {}", fileName, e);
+        }
+    }
+
+    public void logInfo(String message, String fileName, boolean appendTimestamp) {
+        try {
+            String logMessage = message;
+            if (appendTimestamp) {
+                logMessage = LocalDateTime.now().format(TIMESTAMP_FORMAT) + " - " + message;
+            }
+            logMessage += System.lineSeparator();
+
+            Path logPath = Paths.get("logs", fileName);
+            Files.createDirectories(logPath.getParent());
+
+            Files.write(logPath, logMessage.getBytes(),
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.APPEND);
+
+        } catch (IOException e) {
+            log.error("Failed to write to log file: {}", fileName, e);
         }
     }
 }

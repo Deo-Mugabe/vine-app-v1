@@ -75,27 +75,27 @@ public class ChargesServiceImpl{
         long recordsProcessed = 0;
         
     // Process each booking pair
-    for (BookingNamePair pair : bookingPairs) {
-        try {
-            Long bookingId = pair.bookId();
-            Long nameId = pair.nameId();
-            
-            String prisonerQuery = prisonerQuery(nameId, bookingId);
-            String prisonerCharges = getPrisonerCharges(nameId, bookingId);
-            String mugShotString = getMugShotString(nameId, bookingId);
-            
-            sb.append(prisonerQuery);
-            sb.append(prisonerCharges);
-            sb.append(mugShotString);
-            
-            recordsProcessed++;
-            log.debug("Processed booking {} for name {}", bookingId, nameId);
-        } catch (Exception e) {
-            log.error("Error processing booking {} for name {}: {}", 
-                pair.bookId(), pair.nameId(), e.getMessage(), e);
-            // Continue processing other records even if one fails
-        }
-    }
+//    for (BookingNamePair pair : bookingPairs) {
+//        try {
+//            Long bookingId = pair.bookId();
+//            Long nameId = pair.nameId();
+//
+//            String prisonerQuery = prisonerQuery(nameId, bookingId);
+//            String prisonerCharges = getPrisonerCharges(nameId, bookingId);
+//            String mugShotString = getMugShotString(nameId, bookingId);
+//
+//            sb.append(prisonerQuery);
+//            sb.append(prisonerCharges);
+//            sb.append(mugShotString);
+//
+//            recordsProcessed++;
+//            log.debug("Processed booking {} for name {}", bookingId, nameId);
+//        } catch (Exception e) {
+//            log.error("Error processing booking {} for name {}: {}",
+//                pair.bookId(), pair.nameId(), e.getMessage(), e);
+//            // Continue processing other records even if one fails
+//        }
+//    }
 
          // 🔥 Build full path using VineNewVineFilePath + VineInterfile
          String baseDir = sysConfigService.getConfig().getVineNewVineFilePath();
@@ -395,9 +395,6 @@ public class ChargesServiceImpl{
             log.error("Error while clearing mugshot directory: {}", newMugshotDir, e);
         }
     }
-
-
-
 
 }
 

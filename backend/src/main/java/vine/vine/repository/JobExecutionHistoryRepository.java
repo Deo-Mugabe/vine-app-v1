@@ -5,14 +5,22 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import vine.vine.domain.JobExecutionHistoryEntity;
-
+import java.util.Optional;
 import java.time.LocalDateTime;
 import java.util.List;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Page;
 
 @Repository
 public interface JobExecutionHistoryRepository extends JpaRepository<JobExecutionHistoryEntity, Long> {
 
     List<JobExecutionHistoryEntity> findByJobNameAndJobGroupOrderByStartTimeDesc(String jobName, String jobGroup);
+
+    Optional<JobExecutionHistoryEntity> findTopByOrderByStartTimeDesc();
+
+    Page<JobExecutionHistoryEntity> findByStartTimeAfter(LocalDateTime cutoff, Pageable pageable);
+
+    long countByStatus(JobExecutionHistoryEntity.ExecutionStatus status);
 
     @Query("SELECT j FROM JobExecutionHistoryEntity j WHERE j.jobName = :jobName AND j.jobGroup = :jobGroup ORDER BY j.startTime DESC")
     List<JobExecutionHistoryEntity> findJobHistory(@Param("jobName") String jobName, @Param("jobGroup") String jobGroup);

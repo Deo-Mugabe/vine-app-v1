@@ -14,13 +14,15 @@ public class AutoWiringSpringBeanJobFactory extends SpringBeanJobFactory impleme
 
     @Override
     public void setApplicationContext(ApplicationContext applicationContext) {
-        beanFactory = applicationContext.getAutowireCapableBeanFactory();
+        this.beanFactory = applicationContext.getAutowireCapableBeanFactory();
     }
 
     @Override
     protected Object createJobInstance(TriggerFiredBundle bundle) throws Exception {
         Object job = super.createJobInstance(bundle);
-        beanFactory.autowireBean(job);
+        if (beanFactory != null) {
+            beanFactory.autowireBean(job);
+        }
         return job;
     }
 }
