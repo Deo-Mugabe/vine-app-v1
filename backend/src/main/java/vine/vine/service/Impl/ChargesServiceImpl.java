@@ -67,31 +67,60 @@ public class ChargesServiceImpl implements ChargesService {
     }
 
      @Override
-    public Long  processBookings(LocalDateTime lastRunTime) {
+    public Long processBookings(LocalDateTime lastRunTime) {
+        log.info("🚀 Starting processBookings with lastRunTime: {}", lastRunTime);
+        
         clearNewMugshotDir();
+        
+        // ✅ Add debugging here
         List<BookingNamePair> bookingPairs = bookingFetcher.fetchBookingAndNameIds(lastRunTime);
+        log.info("📊 BookingFetcher returned {} pairs", bookingPairs.size());
 
         StringBuilder sb = new StringBuilder();
         long recordsProcessed = 0;
 
-      for (BookingNamePair pair : bookingPairs) {
-          Long bookingId = pair.bookId();
-          Long nameId = pair.nameId();
-          String prisonerQuery = prisonerQuery(nameId, bookingId);
-          String prisonerCharges = getPrisonerCharges(nameId, bookingId);
-          String mugShotString = getMugShotString(nameId, bookingId);
-          sb.append(prisonerQuery);
-          sb.append(prisonerCharges);
-          sb.append(mugShotString);
-      }
+        for (BookingNamePair pair : bookingPairs) {
+            Long bookingId = pair.bookId();
+            Long nameId = pair.nameId();
+            
+            log.debug("🔄 Processing booking pair: bookId={}, nameId={}", bookingId, nameId);
+            
+            try {
+                String prisonerQuery = prisonerQuery(nameId, bookingId);
+                String prisonerCharges = getPrisonerCharges(nameId, bookingId);
+                String mugShotString = getMugShotString(nameId, bookingId);
+                
+                // ✅ Check if we actually got data
+                boolean hasData = !prisonerQuery.isEmpty() || !prisonerCharges.isEmpty() || !mugShotString.isEmpty();
+                
+                if (hasData) {
+                    sb.append(prisonerQuery);
+                    sb.append(prisonerCharges);
+                    sb.append(mugShotString);
+                    recordsProcessed++;
+                    
+                    log.debug("✅ Successfully processed booking {}: prisoner={} chars, charges={} chars, mugshot={} chars", 
+                        bookingId, prisonerQuery.length(), prisonerCharges.length(), mugShotString.length());
+                } else {
+                    log.warn("⚠️ No data generated for booking {}, nameId {}", bookingId, nameId);
+                }
+                
+            } catch (Exception e) {
+                log.error("❌ Error processing booking pair bookId={}, nameId={}", bookingId, nameId, e);
+            }
+        }
 
-         // 🔥 Build full path using VineNewVineFilePath + VineInterfile
-         String baseDir = sysConfigService.getConfig().getVineNewVineFilePath();
-         String fileName = sysConfigService.getConfig().getVineInterFile();
-         String fullPath = Paths.get(baseDir, fileName).toString();
+        // 🔥 Build full path using VineNewVineFilePath + VineInterfile
+        String baseDir = sysConfigService.getConfig().getVineNewVineFilePath();
+        String fileName = sysConfigService.getConfig().getVineInterFile();
+        String fullPath = Paths.get(baseDir, fileName).toString();
 
-         writeToFile(sb.toString(), fullPath);
-        log.info("Processed {} booking records", recordsProcessed);
+        log.info("📁 Writing to file: {}", fullPath);
+        log.info("📝 File content length: {} characters", sb.length());
+        
+        writeToFile(sb.toString(), fullPath);
+        
+        log.info("✅ Processed {} booking records out of {} pairs", recordsProcessed, bookingPairs.size());
         return recordsProcessed;
     }
 

@@ -45,103 +45,128 @@ public class SchedulerService {
     private static final String TRIGGER_GROUP = "vine-group";
     private static final String CONFIG_NAME = "booking-processor";
 
-    @PostConstruct
-    public void initializeSchedulerConfig() {
-        try {
-            log.info("🔧 Initializing scheduler configuration - MANUAL START ONLY...");
+   @PostConstruct
+public void initializeSchedulerConfig() {
+    try {
+        log.info("🔧 Initializing scheduler configuration - MANUAL START ONLY...");
 
-            if (schedulerConfigRepository == null) {
-                log.error("SchedulerConfigRepository is null!");
-                return;
-            }
-
-            // ✅ ALWAYS CREATE/RESET CONFIG AS DISABLED ON STARTUP
-            Optional<SchedulerConfigEntity> existingConfig = schedulerConfigRepository.findById(CONFIG_NAME);
-            SchedulerConfigEntity config;
-            
-            if (existingConfig.isPresent()) {
-                config = existingConfig.get();
-                log.info("🔄 Resetting existing scheduler configuration to DISABLED state");
-            } else {
-                log.info("🆕 Creating new scheduler configuration in DISABLED state");
-                config = new SchedulerConfigEntity();
-                config.setConfigName(CONFIG_NAME);
-            }
-            
-            // ✅ FORCE DISABLED STATE ON STARTUP
-            config.setEnabled(false);
-            config.setIntervalMinutes(30); // Default interval
-            if (config.getStartFromTime() == null) {
-                config.setStartFromTime(LocalDateTime.now().minusDays(30));
-            }
-            config.setLastStopTime(LocalDateTime.now()); // Mark as stopped on startup
-            config.setNextRunTime(null); // Clear any scheduled runs
-            
-            schedulerConfigRepository.save(config);
-            log.info("✅ Scheduler configuration saved in DISABLED state");
-            
-            // ✅ START QUARTZ SCHEDULER BUT WITH NO ACTIVE TRIGGERS
-            if (scheduler != null && !scheduler.isStarted()) {
-                log.info("🔄 Starting Quartz scheduler framework (without active jobs)...");
-                scheduler.start();
-                log.info("✅ Quartz scheduler framework started - waiting for manual trigger");
-            }
-            
-            // ✅ REMOVE ANY EXISTING TRIGGERS FROM PREVIOUS SESSIONS
-            if (scheduler != null && scheduler.checkExists(TriggerKey.triggerKey(TRIGGER_NAME, TRIGGER_GROUP))) {
-                log.info("🧹 Removing any existing triggers from previous session...");
-                scheduler.unscheduleJob(TriggerKey.triggerKey(TRIGGER_NAME, TRIGGER_GROUP));
-                log.info("✅ Previous triggers cleaned up");
-            }
-            
-            // ✅ ENSURE JOB IS REGISTERED BUT NOT SCHEDULED
-            ensureJobIsRegistered();
-            
-            log.info("✅ Scheduler initialization complete - Ready for MANUAL START via frontend");
-            
-        } catch (Exception e) {
-            log.error("❌ Error initializing scheduler configuration", e);
+        if (schedulerConfigRepository == null) {
+            log.error("SchedulerConfigRepository is null!");
+            return;
         }
+
+        // ✅ CLEAN QUARTZ TABLES FIRST - BEFORE STARTING SCHEDULER
+        cleanQuartzTables();
+
+        // ✅ ALWAYS CREATE/RESET CONFIG AS DISABLED ON STARTUP
+        Optional<SchedulerConfigEntity> existingConfig = schedulerConfigRepository.findById(CONFIG_NAME);
+        SchedulerConfigEntity config;
+        
+        if (existingConfig.isPresent()) {
+            config = existingConfig.get();
+            log.info("🔄 Resetting existing scheduler configuration to DISABLED state");
+        } else {
+            log.info("🆕 Creating new scheduler configuration in DISABLED state");
+            config = new SchedulerConfigEntity();
+            config.setConfigName(CONFIG_NAME);
+        }
+        
+        // ✅ FORCE DISABLED STATE ON STARTUP
+        config.setEnabled(false);
+        config.setIntervalMinutes(30); // Default interval
+        if (config.getStartFromTime() == null) {
+            config.setStartFromTime(LocalDateTime.now().minusDays(30));
+        }
+        config.setLastStopTime(LocalDateTime.now()); // Mark as stopped on startup
+        config.setNextRunTime(null); // Clear any scheduled runs
+        
+        schedulerConfigRepository.save(config);
+        log.info("✅ Scheduler configuration saved in DISABLED state");
+        
+        // ✅ START QUARTZ SCHEDULER BUT WITH NO ACTIVE TRIGGERS
+        if (scheduler != null && !scheduler.isStarted()) {
+            log.info("🔄 Starting Quartz scheduler framework (without active jobs)...");
+            scheduler.start();
+            log.info("✅ Quartz scheduler framework started - waiting for manual trigger");
+        }
+        
+        // ✅ ENSURE JOB IS REGISTERED BUT NOT SCHEDULED
+        ensureJobIsRegistered();
+        
+        log.info("✅ Scheduler initialization complete - Ready for MANUAL START via frontend");
+        
+    } catch (Exception e) {
+        log.error("❌ Error initializing scheduler configuration", e);
     }
+}
 
-    private void ensureJobIsRegistered() {
-        try {
-            if (scheduler == null) {
-                log.warn("⚠️ Scheduler not available for job registration");
-                return;
-            }
+/**
+ * ✅ NEW METHOD: Clean all Quartz tables to prevent auto-recovery
+ */
+private void cleanQuartzTables() {
+    try {
+        if (scheduler != null && scheduler.isStarted()) {
+            log.info("🧹 Stopping scheduler before cleaning tables...");
+            scheduler.standby();
+        }
 
-            JobKey jobKey = new JobKey(JOB_NAME, JOB_GROUP);
-
-            if (!scheduler.checkExists(jobKey)) {
-                log.info("📝 Registering job definition (without scheduling)...");
-
-                JobDetail jobDetail = bookingProcessorJobDetail;
-                if (jobDetail == null) {
-                    log.info("🔧 Creating JobDetail manually");
-                    jobDetail = JobBuilder.newJob(BookingProcessorJob.class)
-                            .withIdentity(JOB_NAME, JOB_GROUP)
-                            .withDescription("Job to process bookings - Manual start only")
-                            .storeDurably(true) // ✅ Important: allows job to exist without trigger
-                            .requestRecovery(false) // ✅ Don't auto-recover on startup
-                            .build();
-                }
-
-                scheduler.addJob(jobDetail, true);
-                log.info("✅ Job registered successfully: {} (not scheduled)", JOB_NAME);
-            } else {
-                log.info("✅ Job already exists: {} (checking if scheduled...)", JOB_NAME);
-                
-                // ✅ DOUBLE CHECK: Remove any triggers even if job exists
-                if (scheduler.checkExists(TriggerKey.triggerKey(TRIGGER_NAME, TRIGGER_GROUP))) {
-                    scheduler.unscheduleJob(TriggerKey.triggerKey(TRIGGER_NAME, TRIGGER_GROUP));
-                    log.info("🧹 Removed existing trigger for job");
+        log.info("🧹 Cleaning Quartz tables to prevent auto-recovery...");
+        
+        // Clear all triggers first
+        if (scheduler != null) {
+            for (String groupName : scheduler.getTriggerGroupNames()) {
+                for (TriggerKey triggerKey : scheduler.getTriggerKeys(org.quartz.impl.matchers.GroupMatcher.triggerGroupEquals(groupName))) {
+                    scheduler.unscheduleJob(triggerKey);
+                    log.info("🗑️ Removed trigger: {}", triggerKey);
                 }
             }
-        } catch (SchedulerException e) {
-            log.error("❌ Error ensuring job is registered", e);
+            
+            // Clear all jobs
+            for (String groupName : scheduler.getJobGroupNames()) {
+                for (JobKey jobKey : scheduler.getJobKeys(org.quartz.impl.matchers.GroupMatcher.jobGroupEquals(groupName))) {
+                    scheduler.deleteJob(jobKey);
+                    log.info("🗑️ Removed job: {}", jobKey);
+                }
+            }
         }
+        
+        log.info("✅ Quartz tables cleaned successfully");
+        
+    } catch (Exception e) {
+        log.error("❌ Error cleaning Quartz tables", e);
     }
+}
+
+private void ensureJobIsRegistered() {
+    try {
+        if (scheduler == null) {
+            log.warn("⚠️ Scheduler not available for job registration");
+            return;
+        }
+
+        JobKey jobKey = new JobKey(JOB_NAME, JOB_GROUP);
+
+        // ✅ ALWAYS RE-REGISTER JOB AFTER CLEANING
+        log.info("📝 Registering job definition (without scheduling)...");
+
+        JobDetail jobDetail = bookingProcessorJobDetail;
+        if (jobDetail == null) {
+            log.info("🔧 Creating JobDetail manually");
+            jobDetail = JobBuilder.newJob(BookingProcessorJob.class)
+                    .withIdentity(JOB_NAME, JOB_GROUP)
+                    .withDescription("Job to process bookings - Manual start only")
+                    .storeDurably(true) // ✅ Important: allows job to exist without trigger
+                    .requestRecovery(false) // ✅ Don't auto-recover on startup
+                    .build();
+        }
+
+        scheduler.addJob(jobDetail, true); // true = replace if exists
+        log.info("✅ Job registered successfully: {} (not scheduled)", JOB_NAME);
+        
+    } catch (SchedulerException e) {
+        log.error("❌ Error ensuring job is registered", e);
+    }
+}
 
     @Transactional
     public SchedulerStatusDto startScheduler(int intervalMinutes) {
@@ -540,6 +565,10 @@ public class SchedulerService {
             execution.setProcessFromTime(processFromTime);
             execution.setProcessToTime(processToTime);
             
+            // ✅ NEW: Set success message with record count
+            String successMessage = String.format("Successfully processed %d records", recordsProcessed);
+            execution.setErrorMessage(successMessage); // Using errorMessage field for general messages
+            
             if (execution.getStartTime() != null) {
                 long durationMs = java.time.Duration.between(execution.getStartTime(), endTime).toMillis();
                 execution.setDurationMs(durationMs);
@@ -571,7 +600,10 @@ public class SchedulerService {
             JobExecutionHistoryEntity execution = executionOpt.get();
             execution.setEndTime(endTime);
             execution.setStatus(JobExecutionHistoryEntity.ExecutionStatus.FAILED);
-            execution.setErrorMessage(errorMessage);
+            
+            // ✅ Format error message nicely
+            String formattedError = String.format("Job failed: %s", errorMessage);
+            execution.setErrorMessage(formattedError);
             
             if (execution.getStartTime() != null) {
                 long durationMs = java.time.Duration.between(execution.getStartTime(), endTime).toMillis();
@@ -614,6 +646,19 @@ public class SchedulerService {
         dto.setDurationMs(entity.getDurationMs());
         dto.setProcessFromTime(entity.getProcessFromTime());
         dto.setProcessToTime(entity.getProcessToTime());
+        
+        // ✅ NEW: Set appropriate message based on status
+        if (entity.getStatus() == JobExecutionHistoryEntity.ExecutionStatus.COMPLETED) {
+            dto.setMessage(String.format("Successfully processed %d records", 
+                entity.getRecordsProcessed() != null ? entity.getRecordsProcessed() : 0));
+        } else if (entity.getStatus() == JobExecutionHistoryEntity.ExecutionStatus.FAILED) {
+            dto.setMessage(entity.getErrorMessage() != null ? entity.getErrorMessage() : "Job failed");
+        } else if (entity.getStatus() == JobExecutionHistoryEntity.ExecutionStatus.STARTED) {
+            dto.setMessage("Job is running...");
+        } else {
+            dto.setMessage("No message");
+        }
+        
         return dto;
     }
 }
