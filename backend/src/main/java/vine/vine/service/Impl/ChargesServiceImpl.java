@@ -53,6 +53,7 @@ public class ChargesServiceImpl implements ChargesService {
     private final SysConfigService sysConfigService;
     private final SysImageRepository sysImageRepository;
     private final ServiceLog serviceLog;
+    private final TransferService transferService;
 
 
     // @Override
@@ -121,6 +122,7 @@ public class ChargesServiceImpl implements ChargesService {
         writeToFile(sb.toString(), fullPath);
         
         log.info("✅ Processed {} booking records out of {} pairs", recordsProcessed, bookingPairs.size());
+        transferService.ftpDataAndMugshotFiles(); 
         return recordsProcessed;
     }
 
